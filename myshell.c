@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <string.h>
+#include <signal.h>
+
 
 typedef struct Command {
     char* command; /*The file name to execute*/
@@ -23,14 +25,17 @@ Command initCommand(){
 }
 
 
-Command arglistToCommand(int count , char** arglist){
+Command arglistToCommand(int* count , char** arglist){
     Command command =  initCommand();
-    if (count!=0){
+    int c = *count;
+    if (c!=0){
         command.command = arglist[0];
     }
     int i = 0;
-    for (i =0 ; i<count; i++){
+    for (i =0 ; i<c; i++){
         if (strcmp(arglist[i],"&")==0){
+            arglist[i] = NULL;
+            *count = c-1;
             command.background = 1;
         }
         if (strcmp(arglist[i],">")==0){
@@ -56,13 +61,20 @@ void printCommand (Command* cmd){
 
 
 int prepare(){
+    signal(SIGINT, SIG_IGN);
     return 0;
 }
 
 int finalize (){
+    signal(SIGINT, SIG_DFL);
+    kill(0,SIGKILL);
     return 0;
 }
 
+void handle_SIGCHLD(int sig){
+    /* When getting a SIGCHILD signal => wait for it so won't be zombied*/
+    wait(NULL);
+}
 
 void print_array(int count ,char** array){
     int i =0;
@@ -72,18 +84,25 @@ void print_array(int count ,char** array){
     }
 }
 
+
 int process_arglist(int count, char **arglist){
+    Command command = arglistToCommand(&count,arglist);
     int status;
     int pid = fork();
-    Command command = arglistToCommand(count,arglist);
     if (pid == 0){
-        //Child (part to execute)
+        //Child
+        if (command.background == 0){
+            signal(SIGINT,SIG_DFL);
+        }
         execvp(command.command,arglist);
     }
     else{
+        //Parent (part to execute)
+        signal(SIGINT, SIG_IGN);
+        signal(SIGCHLD,handle_SIGCHLD);
         if (command.background==0){
             waitpid(pid,&status,0);
-        }   
+        }
     }
     return 1;
 }
