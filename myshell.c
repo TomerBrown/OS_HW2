@@ -108,7 +108,16 @@ int process_arglist(int count, char **arglist){
     Command command = arglistToCommand(&count,arglist);
     int status;
     int file = 0;
-    
+    if (command.output_bol==1){
+        //open the file (Or create if does not excists yet with correct permissions)
+        file = open(command.redictOutPath,O_WRONLY | O_CREAT  ,0777);
+        if (file < 0 ){
+            //Error opening file
+            fprintf(stderr, "Error: an error occured while opened a file\n");
+            exit(1);
+        }
+    }
+
     int pid = fork();
     if (pid == 0){
         //Child
@@ -121,14 +130,6 @@ int process_arglist(int count, char **arglist){
 
         //Deal with processes that should redirect their output to file
         if (command.output_bol == 1){
-            //open the file (Or create if does not excists yet with correct permissions)
-            file = open(command.redictOutPath,O_WRONLY | O_CREAT  ,0777);
-            if (file < 0 ){
-                //Error opening file
-                fprintf(stderr, "Error: an error occured while opened a file\n");
-                exit(1);
-            }
-
             //Redirect output of stdout (1) to file
             if (dup2(file,1)== -1){
                 fprintf(stderr, "Error: an error occured while redirecting std out\n");
@@ -138,7 +139,6 @@ int process_arglist(int count, char **arglist){
         //Execute the process or report an error
         if (execvp(command.command,arglist)== -1){
             fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
-            close(file);
             exit(0);
         }
 
@@ -149,6 +149,12 @@ int process_arglist(int count, char **arglist){
         if (command.background==0){
             // If the process should run regulary 
             waitpid(pid,&status,0);
+            // after child process finish close file in was opened
+            if (command.output_bol == 1){
+                if (close(file)==-1){
+                    fprintf(stderr, "Error: an error occured while closing file");
+                }
+            }
         }
     }
     return 1;
