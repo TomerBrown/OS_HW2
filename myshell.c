@@ -5,6 +5,8 @@
 #include <string.h>
 #include <signal.h>
 #include <fcntl.h>
+# include <errno.h>
+
 /*A struct to parse the command to diffrent part and info needed*/ 
 typedef struct Command {
     char* command; /*1) The file name to execute*/
@@ -167,7 +169,6 @@ int finalize (){
 
 /* The Function to execute the command the given by shell.c file*/
 int process_arglist(int count, char **arglist){
-
     //Initialize parameters
     int status;
     int status2;
@@ -250,8 +251,12 @@ int process_arglist(int count, char **arglist){
             // If the process should run regulary - wait for it
             if (waitpid(-1,&status2,0)== -1){
                 fprintf(stderr, "Error: an error occured while waiting");
-                return 0;
+                if (errno == ECHILD || errno == EINTR){
+                    fprintf(stderr, "Error: an error occured while waiting");
+                    return 0;
+                }
             }
+            
             // after child process finish close file in was opened
             if (command.output_bol == 1){
                 if (close(file)==-1){
