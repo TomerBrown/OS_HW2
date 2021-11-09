@@ -253,7 +253,7 @@ int process_arglist(int count, char **arglist){
                 fprintf(stderr, "Error: an error occured while waiting");
                 if (errno == ECHILD || errno == EINTR){
                     fprintf(stderr, "Error: an error occured while waiting");
-                    return 0;
+                    exit(1);
                 }
             }
             
