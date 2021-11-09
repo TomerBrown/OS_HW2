@@ -159,7 +159,9 @@ int finalize (){
     // Return SIGINT to default
     signal(SIGINT, SIG_DFL);
     //Kill Every process running if exited the shell (even if in background)
-    kill(0,SIGKILL);
+    if (kill(0,SIGKILL)==-1){
+        return 1;
+    };
     return 0;
 }
 
@@ -182,7 +184,7 @@ int process_arglist(int count, char **arglist){
         if (file < 0 ){
             //Error opening file
             fprintf(stderr, "Error: an error occured while opened a file\n");
-            exit(1);
+            return 0;
         }
     }
     
@@ -229,7 +231,7 @@ int process_arglist(int count, char **arglist){
             else{
                 //Parent
                 //Wait for child to finish and Change stdin to recieve input from pipe (read port)
-                wait(&status2);
+                wait(&status);
                 dup2(pipe_fd[0],0);
                 command.command = command.command2;
             }
@@ -246,11 +248,15 @@ int process_arglist(int count, char **arglist){
         signal(SIGINT, SIG_IGN);
         if (command.background==0){
             // If the process should run regulary - wait for it
-            waitpid(pid,&status,0);
+            if (waitpid(-1,&status2,0)== -1){
+                fprintf(stderr, "Error: an error occured while waiting");
+                return 0;
+            }
             // after child process finish close file in was opened
             if (command.output_bol == 1){
                 if (close(file)==-1){
                     fprintf(stderr, "Error: an error occured while closing file");
+                    return 0;
                 }
             }
         }
