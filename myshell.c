@@ -90,7 +90,9 @@ void printCommand (Command* cmd){
 }
 
 void handle_SIGCHLD(int sig){
-    wait(NULL);  
+    if (wait(NULL)==-1){
+        fprintf(stderr, "Error: an error occured while waiting for Child");
+    }  
 }
 
 Command arglistToCommand(int* count , char** arglist){
@@ -171,7 +173,6 @@ int finalize (){
 int process_arglist(int count, char **arglist){
     //Initialize parameters
     int status;
-    int status2;
     int pipe_fd[2];
     int pid2;
     int file = 0;
@@ -231,8 +232,7 @@ int process_arglist(int count, char **arglist){
             }
             else{
                 //Parent
-                //Wait for child to finish and Change stdin to recieve input from pipe (read port)
-                wait(&status);
+                //Change stdin to recieve input from pipe (read port)
                 dup2(pipe_fd[0],0);
                 command.command = command.command2;
             }
@@ -249,7 +249,7 @@ int process_arglist(int count, char **arglist){
         signal(SIGINT, SIG_IGN);
         if (command.background==0){
             // If the process should run regulary - wait for it
-            if (waitpid(-1,&status2,0)== -1){
+            if (waitpid(-1,&status,0)== -1){
                 fprintf(stderr, "Error: an error occured while waiting");
                 if (errno == ECHILD || errno == EINTR){
                     fprintf(stderr, "Error: an error occured while waiting");
