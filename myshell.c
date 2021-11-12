@@ -201,7 +201,11 @@ int regular_process(Command* command , char** arglist){
     }
 
     // Shell Proccess
-    waitpid(pid , &status, 0);
+    if (waitpid(pid , &status, 0)==-1){
+        if (errno != ECHILD && errno != EINTR){
+            return 1;
+        }
+    }
     return 0;
 }
 
@@ -294,12 +298,21 @@ int piped_process (Command* command){
 
     close(pipe_fd[0]);
     close(pipe_fd[1]);
-    waitpid (pid1,NULL,0);
-    waitpid (pid2,NULL,0);
+
+    if (waitpid(pid1 , NULL, 0)==-1){
+        if (errno != ECHILD && errno != EINTR){
+            return 1;
+        }
+    }
+    if (waitpid(pid2 , NULL, 0)==-1){
+        if (errno != ECHILD && errno != EINTR){
+            return 1;
+        }
+    }
     return 0;
 }
 
-
+/*A function that deals with processes that redirect output to file*/
 int output_redirect_process (Command* command , char** arglist){
     
     //Initialize Parameters
@@ -349,7 +362,11 @@ int output_redirect_process (Command* command , char** arglist){
     }
 
     // Shell Proccess
-    waitpid(pid , &status, 0);
+    if (waitpid(pid , NULL, 0)==-1){
+        if (errno != ECHILD && errno != EINTR){
+            return 1;
+        }
+    }
     if (close(file)==-1){
         fprintf(stderr, "Error: an error occured while closing file");
         return 0;
