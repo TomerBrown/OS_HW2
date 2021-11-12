@@ -23,23 +23,6 @@ typedef struct Command {
 
 } Command;
 
-/*******************************************
- ********* Function Declerations ***********
- ******************************************/
-
-/* A function that print in array in format [x,y,...,z] */
-void print_array(int,char**);
-
-/*A function that prints out a command (in a parsed form) */
-void printCommand(Command*);
-
-
-/* When getting a SIGCHILD signal => wait for it so won't be zombied*/
-void handle_SIGCHLD(int);
-
-/* A function that parses and changes the command according to the given arguments
-*  When neccessary makes changes to the arglist or count parameters given to it as input */
-Command arglistToCommand(int*, char**);
 
 
 /*******************************************
@@ -63,36 +46,14 @@ Command initCommand(){
     return command;
 }
 
-void print_array(int count ,char** array){
-    int i =0;
-    printf("[");
-    for (i =0; i<count;i++){
-        i != count-1 ? printf("%s ,", array[i]) :printf("%s]\n", array[i]) ;
-    }
-}
-
-void printCommand (Command* cmd){
-    printf("Command {\n");
-    printf("\tcommand: %s \n", cmd->command);
-    printf("\tbackground: %d \n", cmd->background);
-    printf("\toutputbol: %d \n", cmd->output_bol);
-    printf("\tredictOutPath: %s \n", cmd->redictOutPath);
-    printf("\tpiping_bol: %d \n", cmd->piping_bol);
-    printf("\tcommand 1: %s \n", cmd->command1);
-    printf("\tcommand 2: %s \n", cmd->command2);
-    printf("\tcount1 %d \n", cmd->count1);
-    printf("\targlist1: ");
-    print_array(cmd->count1,cmd->arglist1);
-    printf("\tcount2 %d \n", cmd->count2);
-    printf("\targlist2: ");
-    print_array(cmd->count2,cmd->arglist2);
-    printf("}\n");
-}
-
+/*When needed => Wait for child so it won't become zombie*/
 void handle_SIGCHLD(int sig){
     wait(NULL);
 }
 
+/*A function that parses the given command in to Command Struct
+When necessary changes it's input: arglist so it will be compatible
+to use when using execvp(command, arglist)*/
 Command arglistToCommand(int* count , char** arglist){
     Command command =  initCommand();
     int c = *count;
@@ -140,18 +101,6 @@ Command arglistToCommand(int* count , char** arglist){
     return command;
 }
 
-
-/*******************************************
- ********** Requested Functions ************
- ******************************************/
-
-/* A function to run before any command has start*/
-int prepare(){
-    //Igonre SIGINT in shell it self
-    signal(SIGINT, SIG_IGN);
-    return 0;
-}
-
 /*A function to set SIGCHLD handler to avoid zombies!*/
 void set_sigaction_of_shell(Command* command){
     if (command->background){
@@ -165,17 +114,6 @@ void set_sigaction_of_shell(Command* command){
     }
     
     
-}
-
-/* A function to run after shell is closed (Used to kill all child processes)*/
-int finalize (){
-    // Return SIGINT to default
-    signal(SIGINT, SIG_DFL);
-    //Kill Every process running if exited the shell (even if in background)
-    if (kill(0,SIGTERM)==-1){
-        return 1;
-    };
-    return 0;
 }
 
 /*A function to deal with the regular option - no special symbol inserted*/
@@ -317,7 +255,6 @@ int output_redirect_process (Command* command , char** arglist){
     
     //Initialize Parameters
     int file = 0;
-    int status = 0;
 
     //open the file (Or create if does not excists yet with correct permissions)
     file = open(command->redictOutPath,O_WRONLY | O_CREAT  ,0777);
@@ -371,6 +308,29 @@ int output_redirect_process (Command* command , char** arglist){
         fprintf(stderr, "Error: an error occured while closing file");
         return 0;
     }
+    return 0;
+}
+
+
+/*******************************************
+ ********** Requested Functions ************
+ ******************************************/
+
+/* A function to run before any command has start*/
+int prepare(){
+    //Igonre SIGINT in shell it self
+    signal(SIGINT, SIG_IGN);
+    return 0;
+}
+
+/* A function to run after shell is closed (Used to kill all child processes)*/
+int finalize (){
+    // Return SIGINT to default
+    signal(SIGINT, SIG_DFL);
+    //Kill Every process running if exited the shell (even if in background)
+    if (kill(0,SIGTERM)==-1){
+        return 1;
+    };
     return 0;
 }
 
