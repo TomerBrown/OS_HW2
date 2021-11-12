@@ -90,10 +90,7 @@ void printCommand (Command* cmd){
 }
 
 void handle_SIGCHLD(int sig){
-    pid_t pid;
-    int status;
-
-    while((pid= waitpid(-1,&status,WNOHANG)>0));
+    wait(NULL);
 }
 
 Command arglistToCommand(int* count , char** arglist){
@@ -152,11 +149,22 @@ Command arglistToCommand(int* count , char** arglist){
 int prepare(){
     //Igonre SIGINT in shell it self
     signal(SIGINT, SIG_IGN);
-    struct sigaction sa;
-    sa.sa_handler = handle_SIGCHLD;
-    sa.sa_flags = SA_RESTART;
-    sigaction(SIGCHLD, &sa, NULL);
     return 0;
+}
+
+/*A function to set SIGCHLD handler to avoid zombies!*/
+void set_sigaction_of_shell(Command* command){
+    if (command->background){
+        struct sigaction sa;
+        sa.sa_handler = handle_SIGCHLD;
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGCHLD, &sa, NULL);
+    }
+    else{
+        signal(SIGCHLD,SIG_IGN);
+    }
+    
+    
 }
 
 /* A function to run after shell is closed (Used to kill all child processes)*/
@@ -164,108 +172,213 @@ int finalize (){
     // Return SIGINT to default
     signal(SIGINT, SIG_DFL);
     //Kill Every process running if exited the shell (even if in background)
-    if (kill(0,SIGKILL)==-1){
+    if (kill(0,SIGTERM)==-1){
         return 1;
     };
     return 0;
 }
 
-/* The Function to execute the command the given by shell.c file*/
-int process_arglist(int count, char **arglist){
-    //Initialize parameters
+/*A function to deal with the regular option - no special symbol inserted*/
+int regular_process(Command* command , char** arglist){
+
+    //Fork a new child
+    pid_t pid = fork();
     int status;
-    int pipe_fd[2];
-    int pid2;
-    int file = 0;
 
-    // Parse the command to diffrent parts that will be used later
-    Command command = arglistToCommand(&count,arglist);
-
-    if (command.output_bol==1){
-        //open the file (Or create if does not excists yet with correct permissions)
-        file = open(command.redictOutPath,O_WRONLY | O_CREAT  ,0777);
-        if (file < 0 ){
-            //Error opening file
-            fprintf(stderr, "Error: an error occured while opened a file\n");
-            return 0;
-        }
-    }
-    
-    //Fork to execute the command in a diffrent process
-    int pid = fork();
     if (pid < 0){
-        fprintf(stderr, "Error: an error occured while forking a pipe. please try again");
+        //Report On Error
+        fprintf(stderr, "Error: an error occured while forking. please try again\n");
+        return -1;
     }
 
-    else if (pid == 0){
-        //Child
-
-        //Deal with process that do not run on background
-        if (command.background == 0){
-            // as shell process is defaulted to Ignore sigint. regular processes should be defaulted
-            signal(SIGINT,SIG_DFL);
-        }
-
-        //Deal with processes that should redirect their output to file
-        if (command.output_bol == 1){
-            //Redirect output of stdout (1) to file
-            if (dup2(file,1)== -1){
-                fprintf(stderr, "Error: an error occured while redirecting std out\n");
-                exit(1);
-            }
-        }
-        if (command.piping_bol==1){
-            if (pipe(pipe_fd) == -1){
-                fprintf(stderr, "Error: an error occured while trying to create a pipe");
-                exit(1);
-            }
-            pid2 = fork();
-            //We will assume that child passes inforamtion through the pipe to parent 
-            if (pid2 < 0 ){
-                fprintf(stderr, "Error: an error occured while forking a pipe");
-                exit(1);
-            }
-            else if (pid2 == 0){
-                //Child proccess
-                //Change stdout to write output to pipe (write port)
-                dup2(pipe_fd[1],1);
-                command.command = command.command1;
-            }
-            else{
-                //Parent
-                //Change stdin to recieve input from pipe (read port)
-                dup2(pipe_fd[0],0);
-                command.command = command.command2;
-            }
-        }
-
-        //Execute the process or report an error
-        if (execvp(command.command,arglist)== -1){
+    if (pid == 0){
+        //Child Process 
+        signal (SIGINT,SIG_DFL);
+        if (execvp(command->command, arglist)== -1){
             fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
             exit(1);
         }
     }
-    else{
-        //Parent (part to execute)
-        signal(SIGINT, SIG_IGN);
-        if (command.background==0){
-            // If the process should run regulary - wait for it
-            if (waitpid(-1,&status,0)== -1){
-                fprintf(stderr, "Error: an error occured while waiting");
-                if (errno == ECHILD || errno == EINTR){
-                    fprintf(stderr, "Error: an error occured while waiting");
-                    exit(1);
-                }
-            }
-            
-            // after child process finish close file in was opened
-            if (command.output_bol == 1){
-                if (close(file)==-1){
-                    fprintf(stderr, "Error: an error occured while closing file");
-                    return 0;
-                }
-            }
+
+    // Shell Proccess
+    waitpid(pid , &status, 0);
+    return 0;
+}
+
+/*A function that deals with processes that need to run in background*/
+int run_on_background (Command* command, char** arglist){
+    
+    pid_t pid = fork ();
+    if (pid < 0){
+        //Report On Error
+        fprintf(stderr, "Error: an error occured while forking. please try again\n");
+        return -1;
+    }
+    if (pid ==0){
+        //Child Process
+
+        //Set to ignore SIGINT so ^C won't affect this process
+        signal (SIGINT, SIG_IGN);
+        if (execvp(command->command, arglist)== -1){
+            fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
+            exit(1);
         }
+    }
+    
+    // Shell - Not waiting for program and returning
+    return 0;
+
+}
+
+/*A function that deals with processes that uses pipe*/
+int piped_process (Command* command){
+
+    //Initialize Parameters
+    int pipe_fd [2];
+    pid_t pid1 , pid2 = 0;
+
+    //Initialize The Pipe
+    if (pipe(pipe_fd) == -1){
+        fprintf(stderr, "Error: an error occured while trying to create a pipe");
+        exit(1);
+    }
+
+    pid1 = fork();
+    if (pid1 < 0){
+        //Report On Error
+        fprintf(stderr, "Error: an error occured while forking. please try again\n");
+        return -1;
+    }
+    if (pid1 == 0){
+        // First Child Process (First Child -Writes-> to Second Child)
+
+        //Firstly: Change stdout so will write to pipe
+        close (pipe_fd[0]);
+        dup2(pipe_fd[1],1);
+        close(pipe_fd[1]);
+
+        //Secondly: Assure that proccess will terminate on SIGINT
+        signal(SIGINT,SIG_DFL);
+        
+        //Thirdly: Run the process
+        if (execvp(command->command1,command->arglist1)== -1){
+            fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
+            exit(1);
+        }
+    }
+
+    pid2 = fork();
+    if (pid2<0){
+        //Report On Error
+        fprintf(stderr, "Error: an error occured while forking. please try again\n");
+        return -1;
+    }
+    
+    if (pid2 == 0){
+        // First Child Process (First Child -Writes-> to Second Child)
+
+        //Firstly: Change stdin so will read from pipe
+        close (pipe_fd[1]);
+        dup2(pipe_fd[0],0);
+        close(pipe_fd[0]);
+
+        //Secondly: Assure that proccess will terminate on SIGINT
+        signal(SIGINT,SIG_DFL);
+        
+        //Thirdly: Run the process
+        if (execvp(command->command2,command->arglist2)== -1){
+            fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
+            exit(1);
+        }
+    }
+
+    close(pipe_fd[0]);
+    close(pipe_fd[1]);
+    waitpid (pid1,NULL,0);
+    waitpid (pid2,NULL,0);
+    return 0;
+}
+
+
+int output_redirect_process (Command* command , char** arglist){
+    
+    //Initialize Parameters
+    int file = 0;
+    int status = 0;
+
+    //open the file (Or create if does not excists yet with correct permissions)
+    file = open(command->redictOutPath,O_WRONLY | O_CREAT  ,0777);
+    if (file < 0 ){
+        //Error opening file
+        fprintf(stderr, "Error: an error occured while opened a file\n");
+        return 0;
+    }
+    
+    //Fork a new child
+    pid_t pid = fork();
+    
+
+    if (pid < 0){
+        //Report On Error
+        fprintf(stderr, "Error: an error occured while forking. please try again\n");
+        return -1;
+    }
+    
+    if (pid == 0){
+        //Child Process
+
+        //Redirect output of stdout (1) to file
+        if (dup2(file,1)== -1){
+            fprintf(stderr, "Error: an error occured while redirecting std out\n");
+            exit(1);
+        }
+        if (close(file)==-1){
+            fprintf(stderr, "Error: an error occured while closing file");
+            return 0;
+        }
+
+        //Set Signal so would be interuptable
+        signal (SIGINT,SIG_DFL);
+
+        //Execute the program
+        if (execvp(command->command, arglist)== -1){
+            fprintf(stderr, "Error: Couldn't run process (Maybe name was incorrect) \n");
+            exit(1);
+        }
+
+    }
+
+    // Shell Proccess
+    waitpid(pid , &status, 0);
+    if (close(file)==-1){
+        fprintf(stderr, "Error: an error occured while closing file");
+        return 0;
+    }
+    return 0;
+}
+
+/* The Function to execute the command the given by shell.c file*/
+int process_arglist(int count, char ** arglist){
+    Command command = arglistToCommand(&count,arglist);
+    set_sigaction_of_shell(&command);
+
+    if (!command.output_bol && ! command.piping_bol && ! command.background){
+        //If it is not any special case - use the regular option
+        regular_process(&command, arglist);
+    }
+
+    if (command.background){
+        //Need to run process on backgroung and that won't terminate on ^C (SIGINT)
+        run_on_background(&command, arglist);
+    }
+
+    if (command.piping_bol){
+        //Run command with piping
+        piped_process (&command);
+    }
+
+    if (command.output_bol){
+        output_redirect_process(&command,arglist);
     }
     return 1;
 }
