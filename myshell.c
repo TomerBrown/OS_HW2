@@ -90,9 +90,10 @@ void printCommand (Command* cmd){
 }
 
 void handle_SIGCHLD(int sig){
-    if (wait(NULL)==-1){
-        fprintf(stderr, "Error: an error occured while waiting for Child");
-    }  
+    pid_t pid;
+    int status;
+
+    while((pid= waitpid(-1,&status,WNOHANG)>0));
 }
 
 Command arglistToCommand(int* count , char** arglist){
